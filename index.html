@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Commute VR — Understanding Traffic Congestion and Smarter Mobility</title>
+  <meta name="description" content="An immersive WebXR experience that lets you feel the cost of traffic congestion and explore smarter ways to commute — built with A-Frame for Meta Quest 3S." />
+
+  <!-- A-Frame 1.6 via CDN -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+
+  <style>
+    /* ── Global Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0e1a; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; }
+
+    /* ── Desktop HUD ── */
+    #desktop-hud {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      z-index: 9999; background: rgba(10,14,26,0.85);
+      border: 1px solid rgba(99,179,237,0.35); border-radius: 12px;
+      padding: 9px 20px; font-size: 12px; color: #90cdf4;
+      pointer-events: none; backdrop-filter: blur(8px);
+      display: flex; gap: 18px; align-items: center;
+    }
+    #desktop-hud span { opacity: 0.78; }
+    #desktop-hud kbd {
+      background: rgba(255,255,255,0.12); border-radius: 4px;
+      padding: 1px 5px; font-family: monospace; font-size: 10px; color: #e2e8f0;
+    }
+
+    /* ── Loading Screen ── */
+    #loading-screen {
+      position: fixed; inset: 0; z-index: 99999;
+      background: radial-gradient(ellipse at 50% 40%, #0d1b3e 0%, #050a18 100%);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 26px;
+      transition: opacity 0.8s ease;
+    }
+    #loading-screen.fade-out { opacity: 0; pointer-events: none; }
+    .loading-logo {
+      font-size: 2.2rem; font-weight: 700; letter-spacing: -1px;
+      background: linear-gradient(135deg, #63b3ed, #9f7aea, #f6ad55);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .loading-sub { font-size: 0.9rem; color: #718096; }
+    .loading-bar-track { width: 240px; height: 4px; background: rgba(255,255,255,0.1); border-radius: 99px; overflow: hidden; }
+    .loading-bar-fill {
+      height: 100%; background: linear-gradient(90deg, #63b3ed, #9f7aea);
+      border-radius: 99px; animation: loadbar 2.2s ease-in-out forwards;
+    }
+    @keyframes loadbar { 0%{ width:0% } 60%{ width:75% } 100%{ width:100% } }
+
+    /* ── Custom VR button ── */
+    #enter-vr-btn {
+      position: fixed; bottom: 22px; right: 22px; z-index: 9998;
+      background: linear-gradient(135deg, #2b6cb0, #553c9a);
+      color: #fff; border: none; border-radius: 12px;
+      padding: 12px 24px; font-size: 14px; font-weight: 600;
+      cursor: pointer; letter-spacing: 0.5px;
+      box-shadow: 0 4px 20px rgba(99,179,237,0.35);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      display: none;
+    }
+    #enter-vr-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 28px rgba(99,179,237,0.55);
+    }
+    #enter-vr-btn.visible { display: block; }
+
+    /* ── Scene transition flash ── */
+    #scene-flash {
+      position: fixed; inset: 0; z-index: 9990;
+      background: #fff; opacity: 0; pointer-events: none;
+      transition: opacity 0.12s ease;
+    }
+    #scene-flash.active { opacity: 0.18; }
+
+    /* Hide default A-Frame VR button (we use our own) */
+    .a-enter-vr-button { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading-screen">
+  <div class="loading-logo">🚦 Smart Commute VR</div>
+  <div class="loading-sub">Building urban environment… preparing VR scene…</div>
+  <div class="loading-bar-track"><div class="loading-bar-fill"></div></div>
+</div>
+
+<!-- Scene flash overlay -->
+<div id="scene-flash"></div>
+
+<!-- Custom Enter VR button -->
+<button id="enter-vr-btn" aria-label="Enter VR mode">🥽 Enter VR</button>
+
+<!-- Desktop Controls HUD -->
+<div id="desktop-hud">
+  <span>Desktop Preview</span>
+  <span><kbd>W A S D</kbd> Move</span>
+  <span><kbd>Mouse Drag</kbd> Look</span>
+  <span><kbd>Click</kbd> Buttons</span>
+  <span><kbd>G</kbd> Guide</span>
+  <span><kbd>F</kbd> Fullscreen</span>
+</div>
+
+<!-- ════════════════════════════ A-FRAME SCENE ════════════════════════════ -->
+<a-scene
+  id="main-scene"
+  background="color: #0a1628"
+  renderer="antialias: true; logarithmicDepthBuffer: true; colorManagement: true"
+  vr-mode-ui="enabled: true"
+  loading-screen="enabled: false"
+>
+
+  <!-- ── Camera Rig ── -->
+  <a-entity id="camera-rig" position="0 0 8">
+
+    <a-entity
+      id="camera-head"
+      camera="fov: 80; near: 0.05"
+      look-controls="pointerLockEnabled: false"
+      wasd-controls="acceleration: 18; fly: false"
+      position="0 1.65 0">
+    </a-entity>
+
+    <!-- Left controller: thumbstick locomotion -->
+    <a-entity
+      id="left-controller"
+      oculus-touch-controls="hand: left; model: true"
+      thumbstick-move>
+    </a-entity>
+
+    <!-- Right controller: laser pointer + snap turn -->
+    <a-entity
+      id="right-controller"
+      oculus-touch-controls="hand: right; model: true"
+      laser-controls="hand: right"
+      raycaster="objects: .interactive; far: 20; lineColor: #63b3ed; lineOpacity: 0.88"
+      thumbstick-turn>
+    </a-entity>
+
+  </a-entity>
+
+  <!-- ── Lighting ── -->
+  <a-entity light="type: ambient; color: #b0c4de; intensity: 0.55"></a-entity>
+  <a-entity light="type: directional; color: #ffd580; intensity: 0.85" position="-5 12 -8"></a-entity>
+  <a-entity light="type: directional; color: #6a8bbf; intensity: 0.3" position="8 6 10"></a-entity>
+
+  <!-- ── Sky ── -->
+  <a-sky id="sky" color="#0a1628"></a-sky>
+
+  <!-- ── Ground ── -->
+  <a-plane id="ground" width="300" height="300" rotation="-90 0 0"
+    material="color: #1a2035; roughness: 1"></a-plane>
+
+  <!-- ══════════════════ SCENE A — INTRO ══════════════════ -->
+  <a-entity id="scene-intro" position="0 0 0">
+
+    <!-- Panel background -->
+    <a-plane id="intro-bg" position="0 1.65 -2.6" width="3.4" height="2.95"
+      material="color: #0d1b38; opacity: 0.97; shader: flat; side: double"></a-plane>
+    <!-- Glow border -->
+    <a-plane position="0 1.65 -2.61" width="3.48" height="3.03"
+      material="color: #63b3ed; opacity: 0.16; shader: flat; side: double"></a-plane>
+
+    <!-- Title -->
+    <a-text value="🚦 Smart Commute VR"
+      position="0 2.75 -2.58" align="center" width="3.2" color="#63b3ed" font="roboto" wrap-count="28"></a-text>
+
+    <!-- Subtitle -->
+    <a-text value="Experience the cost of traffic. Discover a smarter way to travel."
+      position="0 2.36 -2.58" align="center" width="3.0" color="#e2e8f0" font="roboto" wrap-count="38" line-height="48"></a-text>
+
+    <!-- Divider -->
+    <a-plane position="0 2.16 -2.58" width="2.8" height="0.007"
+      material="color: #4a5568; shader: flat"></a-plane>
+
+    <!-- Problem Statement -->
+    <a-text value="Daily traffic congestion costs millions of people hours of productive time and causes measurable stress. This VR experience lets you feel that impact — then explore smarter alternatives."
+      position="0 1.9 -2.58" align="center" width="2.85" color="#a0aec0" font="roboto" wrap-count="42" line-height="46"></a-text>
+
+    <!-- Controller Tutorial -->
+    <a-plane position="0 1.37 -2.58" width="2.9" height="0.62"
+      material="color: #0a1424; opacity: 0.9; shader: flat; side: double"></a-plane>
+    <a-text value="🎮 Controls:  Right Trigger → Select   |   Left Stick → Move   |   Right Stick → Turn   |   A/X → Guide"
+      position="0 1.37 -2.57" align="center" width="2.75" color="#9f7aea" font="roboto" wrap-count="52" line-height="46"></a-text>
+
+    <!-- START button -->
+    <a-entity id="btn-start" class="interactive"
+      position="0 0.9 -2.58"
+      geometry="primitive: box; width: 1.75; height: 0.46; depth: 0.05"
+      material="color: #2b6cb0; opacity: 0.97; shader: flat"
+      btn-hover="hoverColor: #3182ce; baseColor: #2b6cb0"
+      btn-click="action: startExperience">
+      <a-text value="▶  Start Experience" align="center" position="0 0 0.03" color="#ffffff" width="2.1" font="roboto"></a-text>
+    </a-entity>
+
+    <!-- Decorative mini-skyline -->
+    <a-entity position="0 0.57 -2.62">
+      <a-box width="0.2"  height="0.4"  depth="0.06" position="-1.4 0.2  0" material="color: #1e3a5f; shader: flat"></a-box>
+      <a-box width="0.25" height="0.6"  depth="0.06" position="-1.1 0.3  0" material="color: #234876; shader: flat"></a-box>
+      <a-box width="0.16" height="0.45" depth="0.06" position="-0.8 0.22 0" material="color: #1e3a5f; shader: flat"></a-box>
+      <a-box width="0.32" height="0.8"  depth="0.06" position="-0.45 0.4 0" material="color: #2c5282; shader: flat"></a-box>
+      <a-box width="0.18" height="0.32" depth="0.06" position="-0.1 0.16 0" material="color: #1a3050; shader: flat"></a-box>
+      <a-box width="0.3"  height="0.88" depth="0.06" position="0.22 0.44 0" material="color: #2b4d7c; shader: flat"></a-box>
+      <a-box width="0.2"  height="0.52" depth="0.06" position="0.55 0.26 0" material="color: #1e3a5f; shader: flat"></a-box>
+      <a-box width="0.26" height="0.62" depth="0.06" position="0.88 0.31 0" material="color: #234876; shader: flat"></a-box>
+      <a-box width="0.16" height="0.4"  depth="0.06" position="1.14 0.2  0" material="color: #1a3050; shader: flat"></a-box>
+      <a-box width="0.22" height="0.5"  depth="0.06" position="1.42 0.25 0" material="color: #2c5282; shader: flat"></a-box>
+    </a-entity>
+
+  </a-entity>
+
+  <!-- ══════════════════ SCENE B — TRAFFIC ══════════════════ -->
+  <a-entity id="scene-traffic" visible="false" position="0 0 0">
+
+    <!-- Road surface -->
+    <a-plane id="main-road" width="24" height="200" rotation="-90 0 0" position="0 0.01 0"
+      material="color: #1c1c2e; roughness: 1"></a-plane>
+
+    <!-- Sidewalks -->
+    <a-box width="5" height="0.12" depth="200" position="-14.5 0.06 0"
+      material="color: #2d3748; roughness: 1"></a-box>
+    <a-box width="5" height="0.12" depth="200" position="14.5 0.06 0"
+      material="color: #2d3748; roughness: 1"></a-box>
+
+    <!-- Kerb edges -->
+    <a-box width="0.3" height="0.18" depth="200" position="-12 0.09 0"
+      material="color: #4a5568; roughness: 0.9"></a-box>
+    <a-box width="0.3" height="0.18" depth="200" position="12 0.09 0"
+      material="color: #4a5568; roughness: 0.9"></a-box>
+
+    <!-- Lane markings, crossings, buildings, etc. generated by JS -->
+    <a-entity id="lane-markings" position="0 0.015 0"></a-entity>
+    <a-entity id="crossings"     position="0 0.012 0"></a-entity>
+    <a-entity id="buildings"     position="0 0 0"></a-entity>
+    <a-entity id="streetlights"  position="0 0 0"></a-entity>
+    <a-entity id="traffic-lights" position="0 0 0"></a-entity>
+    <a-entity id="vehicles"      position="0 0 0"></a-entity>
+    <a-entity id="far-skyline"   position="0 0 -85"></a-entity>
+
+    <!-- Info HUD Panel -->
+    <a-entity id="info-hud" position="2.9 2.0 -3.1" rotation="0 -20 0">
+      <a-plane width="2.1" height="1.75"
+        material="color: #0d1b38; opacity: 0.93; shader: flat; side: double"></a-plane>
+      <a-plane width="2.16" height="1.81" position="0 0 -0.01"
+        material="color: #63b3ed; opacity: 0.17; shader: flat; side: double"></a-plane>
+
+      <a-text id="hud-title" value="📊 Commute Metrics (Simulated)"
+        position="0 0.64 0.02" align="center" width="2.0" color="#63b3ed" font="roboto" wrap-count="28"></a-text>
+      <a-plane position="0 0.48 0.02" width="1.9" height="0.006"
+        material="color: #2d3748; shader: flat"></a-plane>
+      <a-text id="hud-duration" value="Journey Time:  48 min"
+        position="-0.12 0.3 0.02" align="left" width="1.85" color="#e2e8f0" font="roboto" wrap-count="30"></a-text>
+      <a-text id="hud-lost" value="Lost to Traffic: 22 min"
+        position="-0.12 0.08 0.02" align="left" width="1.85" color="#fc8181" font="roboto" wrap-count="30"></a-text>
+      <a-text id="hud-speed" value="Avg Speed:  11 km/h"
+        position="-0.12 -0.14 0.02" align="left" width="1.85" color="#f6ad55" font="roboto" wrap-count="30"></a-text>
+      <a-text id="hud-stress" value="Stress:  ██████░░ 75%"
+        position="-0.12 -0.36 0.02" align="left" width="1.85" color="#f56565" font="roboto" wrap-count="30"></a-text>
+      <a-text value="* Illustrative sim values only"
+        position="0 -0.61 0.02" align="center" width="1.9" color="#718096" font="roboto" wrap-count="34"></a-text>
+    </a-entity>
+
+    <!-- Next Scene button -->
+    <a-entity id="btn-scene-c" class="interactive"
+      position="-2.9 1.2 -3.1" rotation="0 20 0"
+      geometry="primitive: box; width: 1.7; height: 0.44; depth: 0.05"
+      material="color: #276749; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #38a169; baseColor: #276749"
+      btn-click="action: goToSceneC">
+      <a-text value="Explore Consequences →" align="center" position="0 0 0.03" color="#ffffff" width="2.0" font="roboto"></a-text>
+    </a-entity>
+
+  </a-entity>
+
+  <!-- ══════════════════ SCENE C — CONSEQUENCES ══════════════════ -->
+  <a-entity id="scene-consequences" visible="false" position="0 0 0">
+
+    <!-- 4 floating consequence cards -->
+    <a-entity position="-3.6 2.0 -3.6" rotation="0 36 0">
+      <a-plane width="2.1" height="1.5" material="color: #2d1b4e; opacity: 0.96; shader: flat; side: double"></a-plane>
+      <a-text value="⏰ Productivity Loss" position="0 0.47 0.02" align="center" width="1.95" color="#d6bcfa" font="roboto" wrap-count="24"></a-text>
+      <a-text value="Workers in congested cities lose an average of 54 hours per year — time that could be spent on work, family, or rest." position="0 0.06 0.02" align="center" width="1.85" color="#e2e8f0" font="roboto" wrap-count="36" line-height="44"></a-text>
+      <a-text value="(Illustrative — not real-time data)" position="0 -0.5 0.02" align="center" width="1.9" color="#805ad5" font="roboto" wrap-count="38"></a-text>
+    </a-entity>
+
+    <a-entity position="3.6 2.0 -3.6" rotation="0 -36 0">
+      <a-plane width="2.1" height="1.5" material="color: #1a3050; opacity: 0.96; shader: flat; side: double"></a-plane>
+      <a-text value="📅 Personal Time Impact" position="0 0.47 0.02" align="center" width="1.95" color="#90cdf4" font="roboto" wrap-count="24"></a-text>
+      <a-text value="A typical urban commuter spends up to 2 extra hours per week beyond the free-flow journey time — every single week." position="0 0.06 0.02" align="center" width="1.85" color="#e2e8f0" font="roboto" wrap-count="36" line-height="44"></a-text>
+      <a-text value="(Illustrative — not real-time data)" position="0 -0.5 0.02" align="center" width="1.9" color="#4299e1" font="roboto" wrap-count="38"></a-text>
+    </a-entity>
+
+    <a-entity position="-3.6 2.0 -6.6" rotation="0 36 0">
+      <a-plane width="2.1" height="1.5" material="color: #3b1515; opacity: 0.96; shader: flat; side: double"></a-plane>
+      <a-text value="😓 Commuter Stress" position="0 0.47 0.02" align="center" width="1.95" color="#fc8181" font="roboto" wrap-count="24"></a-text>
+      <a-text value="Stop-and-go traffic is consistently linked to elevated cortisol, lower mood, and reduced job satisfaction after the commute." position="0 0.06 0.02" align="center" width="1.85" color="#e2e8f0" font="roboto" wrap-count="36" line-height="44"></a-text>
+      <a-text value="(Illustrative — not real-time data)" position="0 -0.5 0.02" align="center" width="1.9" color="#e53e3e" font="roboto" wrap-count="38"></a-text>
+    </a-entity>
+
+    <a-entity position="3.6 2.0 -6.6" rotation="0 -36 0">
+      <a-plane width="2.1" height="1.5" material="color: #1a2e1a; opacity: 0.96; shader: flat; side: double"></a-plane>
+      <a-text value="⛽ Fuel &amp; Emissions" position="0 0.47 0.02" align="center" width="1.95" color="#9ae6b4" font="roboto" wrap-count="24"></a-text>
+      <a-text value="Idling and repeated acceleration in congestion wastes up to 30% more fuel per kilometre than smooth free-flow driving." position="0 0.06 0.02" align="center" width="1.85" color="#e2e8f0" font="roboto" wrap-count="36" line-height="44"></a-text>
+      <a-text value="(Illustrative — not real-time data)" position="0 -0.5 0.02" align="center" width="1.9" color="#48bb78" font="roboto" wrap-count="38"></a-text>
+    </a-entity>
+
+    <!-- Nav buttons -->
+    <a-entity id="btn-scene-d" class="interactive"
+      position="0 0.88 -3.0"
+      geometry="primitive: box; width: 2.0; height: 0.44; depth: 0.05"
+      material="color: #744210; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #dd6b20; baseColor: #744210"
+      btn-click="action: goToSceneD">
+      <a-text value="Compare Scenarios →" align="center" position="0 0 0.03" color="#ffffff" width="2.3" font="roboto"></a-text>
+    </a-entity>
+
+    <a-entity id="btn-back-b" class="interactive"
+      position="0 0.36 -3.0"
+      geometry="primitive: box; width: 2.0; height: 0.4; depth: 0.05"
+      material="color: #2d3748; opacity: 0.92; shader: flat"
+      btn-hover="hoverColor: #4a5568; baseColor: #2d3748"
+      btn-click="action: goToSceneB">
+      <a-text value="← Back to Traffic" align="center" position="0 0 0.03" color="#a0aec0" width="2.3" font="roboto"></a-text>
+    </a-entity>
+
+  </a-entity>
+
+  <!-- ══════════════════ SCENE D — COMPARE ══════════════════ -->
+  <a-entity id="scene-compare" visible="false" position="0 0 0">
+
+    <!-- Scenario label banner -->
+    <a-entity position="0 2.9 -3.1">
+      <a-plane width="3.7" height="0.62" material="color: #0d1b38; opacity: 0.97; shader: flat; side: double"></a-plane>
+      <a-text id="scenario-label" value="🔴  Scenario 1 — Conventional Commute"
+        position="0 0 0.02" align="center" width="3.5" color="#fc8181" font="roboto" wrap-count="42"></a-text>
+    </a-entity>
+
+    <!-- Metric comparison table -->
+    <a-entity id="compare-panel" position="0 1.7 -3.2">
+      <a-plane width="4.2" height="2.6" material="color: #0d1b38; opacity: 0.96; shader: flat; side: double"></a-plane>
+
+      <!-- Column headers -->
+      <a-text value="Metric"        position="-1.55 1.0 0.02" align="left"   width="1.3" color="#718096" font="roboto" wrap-count="16"></a-text>
+      <a-text value="Conventional"  position="0.18  1.0 0.02" align="center" width="1.4" color="#fc8181" font="roboto" wrap-count="16"></a-text>
+      <a-text value="Smarter"       position="1.55  1.0 0.02" align="center" width="1.2" color="#68d391" font="roboto" wrap-count="16"></a-text>
+      <a-plane position="0 0.82 0.02" width="4.0" height="0.006" material="color: #4a5568; shader: flat"></a-plane>
+
+      <!-- Rows -->
+      <a-text value="Journey Time"  position="-1.55 0.6  0.02" align="left"   width="1.3" color="#e2e8f0" font="roboto" wrap-count="16"></a-text>
+      <a-text id="cmp-time-conv"  value="48 min"  position="0.18 0.6  0.02" align="center" width="1.4" color="#fc8181" font="roboto"></a-text>
+      <a-text id="cmp-time-smart" value="28 min"  position="1.55 0.6  0.02" align="center" width="1.2" color="#68d391" font="roboto"></a-text>
+
+      <a-text value="Avg Speed"     position="-1.55 0.3  0.02" align="left"   width="1.3" color="#e2e8f0" font="roboto" wrap-count="16"></a-text>
+      <a-text id="cmp-speed-conv"  value="11 km/h" position="0.18 0.3  0.02" align="center" width="1.4" color="#fc8181" font="roboto"></a-text>
+      <a-text id="cmp-speed-smart" value="32 km/h" position="1.55 0.3  0.02" align="center" width="1.2" color="#68d391" font="roboto"></a-text>
+
+      <a-text value="Full Stops"    position="-1.55 0.0  0.02" align="left"   width="1.3" color="#e2e8f0" font="roboto" wrap-count="16"></a-text>
+      <a-text id="cmp-stops-conv"  value="18"      position="0.18 0.0  0.02" align="center" width="1.4" color="#fc8181" font="roboto"></a-text>
+      <a-text id="cmp-stops-smart" value="4"       position="1.55 0.0  0.02" align="center" width="1.2" color="#68d391" font="roboto"></a-text>
+
+      <a-text value="Extra Fuel"    position="-1.55 -0.3 0.02" align="left"   width="1.3" color="#e2e8f0" font="roboto" wrap-count="16"></a-text>
+      <a-text id="cmp-fuel-conv"   value="+32%"    position="0.18 -0.3 0.02" align="center" width="1.4" color="#fc8181" font="roboto"></a-text>
+      <a-text id="cmp-fuel-smart"  value="+5%"     position="1.55 -0.3 0.02" align="center" width="1.2" color="#68d391" font="roboto"></a-text>
+
+      <a-text value="Stress Index"  position="-1.55 -0.6 0.02" align="left"   width="1.3" color="#e2e8f0" font="roboto" wrap-count="16"></a-text>
+      <a-text id="cmp-stress-conv"  value="75 / 100" position="0.18 -0.6 0.02" align="center" width="1.4" color="#fc8181" font="roboto"></a-text>
+      <a-text id="cmp-stress-smart" value="28 / 100" position="1.55 -0.6 0.02" align="center" width="1.2" color="#68d391" font="roboto"></a-text>
+
+      <a-text value="* All values are simulated for illustrative purposes"
+        position="0 -0.94 0.02" align="center" width="3.9" color="#718096" font="roboto" wrap-count="52"></a-text>
+    </a-entity>
+
+    <!-- Strategies strip -->
+    <a-entity position="0 0.46 -3.1">
+      <a-plane width="4.2" height="0.75" material="color: #0d2518; opacity: 0.93; shader: flat; side: double"></a-plane>
+      <a-text value="💡 Strategies: Route AI  |  Signal Coordination  |  Carpooling  |  Off-Peak Travel  |  Public Transport"
+        position="0 0 0.02" align="center" width="4.0" color="#9ae6b4" font="roboto" wrap-count="60" line-height="46"></a-text>
+    </a-entity>
+
+    <!-- Buttons row -->
+    <a-entity id="btn-toggle-scenario" class="interactive"
+      position="-1.12 -0.2 -3.1"
+      geometry="primitive: box; width: 2.0; height: 0.44; depth: 0.05"
+      material="color: #553c9a; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #6b46c1; baseColor: #553c9a"
+      btn-click="action: toggleScenario">
+      <a-text value="⇄  Switch Scenario" align="center" position="0 0 0.03" color="#ffffff" width="2.3" font="roboto"></a-text>
+    </a-entity>
+
+    <a-entity id="btn-scene-e" class="interactive"
+      position="1.12 -0.2 -3.1"
+      geometry="primitive: box; width: 2.0; height: 0.44; depth: 0.05"
+      material="color: #2b6cb0; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #3182ce; baseColor: #2b6cb0"
+      btn-click="action: goToSceneE">
+      <a-text value="Results &amp; Conclusion →" align="center" position="0 0 0.03" color="#ffffff" width="2.3" font="roboto"></a-text>
+    </a-entity>
+
+  </a-entity>
+
+  <!-- ══════════════════ SCENE E — RESULTS ══════════════════ -->
+  <a-entity id="scene-results" visible="false" position="0 0 0">
+
+    <!-- Main result panel -->
+    <a-entity position="0 1.95 -2.9">
+      <a-plane width="3.5" height="3.6" material="color: #060e1e; opacity: 0.98; shader: flat; side: double"></a-plane>
+      <a-plane width="3.57" height="3.67" position="0 0 -0.01" material="color: #9f7aea; opacity: 0.2; shader: flat; side: double"></a-plane>
+
+      <a-text value="🏁 Journey Results Summary"
+        position="0 1.55 0.02" align="center" width="3.3" color="#9f7aea" font="roboto" wrap-count="30"></a-text>
+      <a-plane position="0 1.3 0.02" width="3.1" height="0.006" material="color: #4a5568; shader: flat"></a-plane>
+
+      <a-text value="⏱  Time Saved:  20 minutes"
+        position="0 1.08 0.02" align="center" width="3.1" color="#68d391" font="roboto" wrap-count="32"></a-text>
+      <a-text value="🚗  Speed Improvement:  +21 km/h average"
+        position="0 0.78 0.02" align="center" width="3.1" color="#63b3ed" font="roboto" wrap-count="36"></a-text>
+      <a-text value="⛽  Fuel Saving:  ~27% less wasted fuel"
+        position="0 0.48 0.02" align="center" width="3.1" color="#f6ad55" font="roboto" wrap-count="36"></a-text>
+      <a-text value="😌  Stress Reduction:  75 → 28  (−63%)"
+        position="0 0.18 0.02" align="center" width="3.1" color="#fc8181" font="roboto" wrap-count="36"></a-text>
+      <a-text value="🛑  Stops Reduced:  18 → 4  (−78%)"
+        position="0 -0.12 0.02" align="center" width="3.1" color="#fbd38d" font="roboto" wrap-count="36"></a-text>
+
+      <a-plane position="0 -0.38 0.02" width="3.1" height="0.006" material="color: #4a5568; shader: flat"></a-plane>
+
+      <a-text value='"Better mobility is not just about reaching a destination. It is about making everyday journeys more efficient, comfortable, and productive."'
+        position="0 -0.9 0.02" align="center" width="3.1" color="#e2e8f0" font="roboto" wrap-count="40" line-height="50"></a-text>
+
+      <a-text value="* All metrics are simulated values for this VR demonstration."
+        position="0 -1.52 0.02" align="center" width="3.2" color="#718096" font="roboto" wrap-count="44"></a-text>
+    </a-entity>
+
+    <!-- Action buttons -->
+    <a-entity id="btn-replay" class="interactive"
+      position="-1.18 -0.45 -2.9"
+      geometry="primitive: box; width: 1.75; height: 0.44; depth: 0.05"
+      material="color: #2b6cb0; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #3182ce; baseColor: #2b6cb0"
+      btn-click="action: replay">
+      <a-text value="↺  Replay Experience" align="center" position="0 0 0.03" color="#ffffff" width="2.0" font="roboto"></a-text>
+    </a-entity>
+
+    <a-entity id="btn-compare-again" class="interactive"
+      position="0 -0.45 -2.9"
+      geometry="primitive: box; width: 1.75; height: 0.44; depth: 0.05"
+      material="color: #553c9a; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #6b46c1; baseColor: #553c9a"
+      btn-click="action: compareAgain">
+      <a-text value="⇄  Compare Again" align="center" position="0 0 0.03" color="#ffffff" width="2.0" font="roboto"></a-text>
+    </a-entity>
+
+    <a-entity id="btn-return-start" class="interactive"
+      position="1.18 -0.45 -2.9"
+      geometry="primitive: box; width: 1.75; height: 0.44; depth: 0.05"
+      material="color: #276749; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #38a169; baseColor: #276749"
+      btn-click="action: returnToStart">
+      <a-text value="⌂  Return to Start" align="center" position="0 0 0.03" color="#ffffff" width="2.0" font="roboto"></a-text>
+    </a-entity>
+
+  </a-entity>
+
+  <!-- ══════════════════ STARS (procedural, added by JS) ══════════════════ -->
+  <a-entity id="star-field" position="0 0 0"></a-entity>
+
+  <!-- ══════════════════ PERSISTENT: Guide Button ══════════════════ -->
+  <a-entity id="guide-btn-wrapper" visible="false" position="-2.1 0.38 -2.6" rotation="0 26 0">
+    <a-entity id="btn-guide" class="interactive"
+      geometry="primitive: box; width: 1.05; height: 0.4; depth: 0.05"
+      material="color: #1a365d; opacity: 0.92; shader: flat"
+      btn-hover="hoverColor: #2a4a7f; baseColor: #1a365d"
+      btn-click="action: showGuide">
+      <a-text value="🎮 Guide" align="center" position="0 0 0.03" color="#90cdf4" width="1.3" font="roboto"></a-text>
+    </a-entity>
+  </a-entity>
+
+  <!-- ══════════════════ CONTROLLER GUIDE MODAL ══════════════════ -->
+  <a-entity id="guide-modal" visible="false" position="0 1.65 -2.45">
+    <a-plane width="2.9" height="2.3" material="color: #0d1b38; opacity: 0.98; shader: flat; side: double"></a-plane>
+    <a-plane width="2.97" height="2.37" position="0 0 -0.01" material="color: #63b3ed; opacity: 0.17; shader: flat; side: double"></a-plane>
+    <a-text value="🎮 Controller Guide"
+      position="0 0.88 0.02" align="center" width="2.7" color="#63b3ed" font="roboto" wrap-count="28"></a-text>
+    <a-plane position="0 0.7 0.02" width="2.6" height="0.006" material="color: #2d3748; shader: flat"></a-plane>
+    <a-text
+      value="Right Trigger  →  Select / activate button
+Left Thumbstick  →  Move (walk through scene)
+Right Thumbstick  →  Snap-turn left / right
+Point Ray at Button  →  Aim and interact
+A / X Button  →  Toggle this guide
+
+Desktop:  WASD keys to move
+Desktop:  Mouse drag to look
+Desktop:  Click buttons directly"
+      position="0 0.1 0.02" align="left" width="2.6" color="#e2e8f0" font="roboto" wrap-count="40" line-height="50"></a-text>
+    <a-entity id="btn-close-guide" class="interactive"
+      position="0 -0.82 0.02"
+      geometry="primitive: box; width: 1.1; height: 0.4; depth: 0.04"
+      material="color: #742a2a; opacity: 0.96; shader: flat"
+      btn-hover="hoverColor: #9b2c2c; baseColor: #742a2a"
+      btn-click="action: hideGuide">
+      <a-text value="✕  Close" align="center" position="0 0 0.03" color="#ffffff" width="1.3" font="roboto"></a-text>
+    </a-entity>
+  </a-entity>
+
+</a-scene>
+
+<!-- ════════════════════════════ JAVASCRIPT ════════════════════════════ -->
+<script>
+'use strict';
+
+/* ───────────────────────────────────────────────────────────────
+   GLOBAL SIMULATION STATE
+─────────────────────────────────────────────────────────────── */
+const SIM = {
+  currentScene: 'intro',
+  currentScenario: 1,
+  guideOpen: false,
+  scenarios: {
+    1: {
+      label: '🔴  Scenario 1 — Conventional Commute',
+      labelColor: '#fc8181',
+      journeyTime: 48,
+      timeLost: 22,
+      avgSpeed: 11,
+      stressIndex: 75,
+      stops: 18,
+      fuelExtra: 32,
+      vehicleSpeedMult: 0.28,
+      vehicleStopProb: 0.62,
+      skyColor: '#0a1628',
+    },
+    2: {
+      label: '🟢  Scenario 2 — Smarter Commute',
+      labelColor: '#68d391',
+      journeyTime: 28,
+      timeLost: 4,
+      avgSpeed: 32,
+      stressIndex: 28,
+      stops: 4,
+      fuelExtra: 5,
+      vehicleSpeedMult: 0.78,
+      vehicleStopProb: 0.10,
+      skyColor: '#0c1e3c',
+    }
+  }
+};
+
+/* ───────────────────────────────────────────────────────────────
+   UTILITY
+─────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+const setText = (id, v) => { const el=$(id); if(el) el.setAttribute('text','value',v); };
+const setVisible = (id, v) => { const el=$(id); if(el) el.setAttribute('visible', v); };
+
+/* ───────────────────────────────────────────────────────────────
+   COMPONENT: btn-hover
+   Colour + scale feedback on hover (mouse & VR raycaster).
+─────────────────────────────────────────────────────────────── */
+AFRAME.registerComponent('btn-hover', {
+  schema: {
+    hoverColor: { type:'color', default:'#4a90d9' },
+    baseColor:  { type:'color', default:'#2b6cb0' }
+  },
+  init() {
+    const el = this.el, d = this.data;
+    const onHover  = () => { el.setAttribute('material','color',d.hoverColor); el.setAttribute('scale','1.05 1.05 1.05'); };
+    const onUnhover= () => { el.setAttribute('material','color',d.baseColor);  el.setAttribute('scale','1 1 1'); };
+    el.addEventListener('mouseenter', onHover);
+    el.addEventListener('mouseleave', onUnhover);
+    el.addEventListener('raycaster-intersected', onHover);
+    el.addEventListener('raycaster-intersected-cleared', onUnhover);
+  }
+});
+
+/* ───────────────────────────────────────────────────────────────
+   COMPONENT: btn-click
+   Routes named actions; debounced 600 ms to avoid repeated fire.
+─────────────────────────────────────────────────────────────── */
+AFRAME.registerComponent('btn-click', {
+  schema: { action: { type:'string' } },
+  init() {
+    const el = this.el, action = this.data.action;
+    let lastFire = 0;
+    const fire = () => {
+      const now = Date.now();
+      if (now - lastFire < 600) return;
+      lastFire = now;
+      handleAction(action);
+    };
+    el.addEventListener('click', fire);
+    el.addEventListener('triggerdown', fire);
+  }
+});
+
+/* ───────────────────────────────────────────────────────────────
+   COMPONENT: thumbstick-move  (left controller locomotion)
+─────────────────────────────────────────────────────────────── */
+AFRAME.registerComponent('thumbstick-move', {
+  init() {
+    this.rig  = $('camera-rig');
+    this.head = $('camera-head');
+    this.tx = 0; this.ty = 0;
+    this.el.addEventListener('thumbstickmoved', e => {
+      this.tx = e.detail.x; this.ty = e.detail.y;
+    });
+  },
+  tick(t, dt) {
+    if (!this.rig || !this.head) return;
+    const tx = this.tx, ty = this.ty;
+    if (Math.abs(tx) < 0.15 && Math.abs(ty) < 0.15) return;
+    const speed = 3.5 * (dt/1000);
+    const q = new THREE.Quaternion();
+    this.head.object3D.getWorldQuaternion(q);
+    const fwd   = new THREE.Vector3(0,0,-1).applyQuaternion(q);
+    const right  = new THREE.Vector3(1,0, 0).applyQuaternion(q);
+    fwd.y = 0; fwd.normalize();
+    right.y = 0; right.normalize();
+    const pos = this.rig.object3D.position;
+    pos.addScaledVector(fwd,  -ty * speed);
+    pos.addScaledVector(right,  tx * speed);
+    pos.x = THREE.MathUtils.clamp(pos.x, -22, 22);
+    pos.z = THREE.MathUtils.clamp(pos.z, -32, 22);
+  }
+});
+
+/* ───────────────────────────────────────────────────────────────
+   COMPONENT: thumbstick-turn  (right controller snap rotation)
+─────────────────────────────────────────────────────────────── */
+AFRAME.registerComponent('thumbstick-turn', {
+  init() {
+    this.rig = $('camera-rig');
+    this.snapping = false;
+    this.el.addEventListener('thumbstickmoved', e => {
+      if (Math.abs(e.detail.x) > 0.7 && !this.snapping) {
+        this.snapping = true;
+        const angle = e.detail.x > 0 ? -30 : 30;
+        const r = this.rig.getAttribute('rotation') || {x:0,y:0,z:0};
+        this.rig.setAttribute('rotation', {x:r.x, y:r.y + angle, z:r.z});
+        setTimeout(() => { this.snapping = false; }, 350);
+      }
+    });
+  }
+});
+
+/* ───────────────────────────────────────────────────────────────
+   COMPONENT: vehicle-move
+   Moves vehicles along their lane with scenario-aware speed
+   and stop-and-go behaviour; wraps position for infinite road.
+─────────────────────────────────────────────────────────────── */
+AFRAME.registerComponent('vehicle-move', {
+  schema: {
+    speed:     { type:'number', default:4 },
+    direction: { type:'number', default:1 },
+    length:    { type:'number', default:3 },
+  },
+  init() {
+    this.curSpeed   = this.data.speed;
+    this.targetSpeed= this.data.speed;
+    this.stopped    = false;
+    this.timer      = Math.random() * 4;
+  },
+  tick(t, dt) {
+    // Only animate when road is visible
+    const sc = SIM.currentScene;
+    if (sc === 'intro' || sc === 'results') return;
+
+    const s   = SIM.scenarios[SIM.currentScenario];
+    const mult= s.vehicleSpeedMult;
+    const pStop = s.vehicleStopProb;
+    const secs  = dt / 1000;
+
+    // Stop/go state machine
+    this.timer -= secs;
+    if (this.timer <= 0) {
+      if (!this.stopped && Math.random() < pStop * 0.018) {
+        this.stopped = true;
+        this.timer = 1.5 + Math.random() * 5;
+      } else if (this.stopped) {
+        this.stopped = false;
+        this.timer = 2 + Math.random() * 6;
+      } else {
+        this.timer = 0.4 + Math.random() * 2;
+      }
+    }
+
+    this.targetSpeed = this.stopped ? 0 : this.data.speed * mult;
+    const accel = this.stopped ? 8 : 2.5;
+    this.curSpeed += (this.targetSpeed - this.curSpeed) * Math.min(1, secs * accel);
+
+    const pos = this.el.object3D.position;
+    pos.z += this.data.direction * this.curSpeed * secs;
+
+    // Wrap around so road is always populated
+    if (this.data.direction ===  1 && pos.z >  85) pos.z = -85;
+    if (this.data.direction === -1 && pos.z < -85) pos.z =  85;
+  }
+});
+
+/* ───────────────────────────────────────────────────────────────
+   COMPONENT: traffic-light-cycle
+─────────────────────────────────────────────────────────────── */
+AFRAME.registerComponent('traffic-light-cycle', {
+  schema: { offset: { type:'number', default:0 } },
+  init() {
+    this.phase  = 0; // 0=red 1=amber 2=green
+    this.timer  = this.data.offset % 11.5;
+    this.durs   = [5, 1.5, 5];
+    this.redEl  = this.el.querySelector('.tl-red');
+    this.ambEl  = this.el.querySelector('.tl-amber');
+    this.grnEl  = this.el.querySelector('.tl-green');
+  },
+  tick(t, dt) {
+    this.timer -= dt/1000;
+    if (this.timer <= 0) {
+      this.phase = (this.phase + 1) % 3;
+      this.timer = this.durs[this.phase];
+    }
+    const on  = ['#ff3333','#ffaa00','#00cc44'];
+    const off = '#111111';
+    if (this.redEl) this.redEl.setAttribute('material','color', this.phase===0 ? on[0] : off);
+    if (this.ambEl) this.ambEl.setAttribute('material','color', this.phase===1 ? on[1] : off);
+    if (this.grnEl) this.grnEl.setAttribute('material','color', this.phase===2 ? on[2] : off);
+  }
+});
+
+/* ───────────────────────────────────────────────────────────────
+   SCENE MANAGEMENT
+─────────────────────────────────────────────────────────────── */
+function showScene(name) {
+  ['scene-intro','scene-traffic','scene-consequences','scene-compare','scene-results']
+    .forEach(id => setVisible(id, false));
+
+  setVisible('guide-btn-wrapper', name !== 'intro');
+  SIM.currentScene = name;
+
+  if (name === 'intro')        { setVisible('scene-intro', true); }
+  if (name === 'traffic')      { setVisible('scene-traffic', true); updateHUD(); }
+  if (name === 'consequences') { setVisible('scene-traffic', true); setVisible('scene-consequences', true); }
+  if (name === 'compare')      {
+    setVisible('scene-traffic', true);
+    setVisible('scene-compare', true);
+    updateComparePanel();
+    updateScenarioLabel();
+    applyScenario();
+  }
+  if (name === 'results')      { setVisible('scene-results', true); }
+}
+
+/* ───────────────────────────────────────────────────────────────
+   METRIC UPDATES
+─────────────────────────────────────────────────────────────── */
+function updateHUD() {
+  const sc = SIM.scenarios[SIM.currentScenario];
+  setText('hud-duration', `Journey Time:  ${sc.journeyTime} min`);
+  setText('hud-lost',     `Lost to Traffic: ${sc.timeLost} min`);
+  setText('hud-speed',    `Avg Speed:  ${sc.avgSpeed} km/h`);
+  const bars = Math.round(sc.stressIndex / 12.5);
+  setText('hud-stress',   `Stress:  ${'█'.repeat(bars)}${'░'.repeat(8-bars)} ${sc.stressIndex}%`);
+}
+
+function updateComparePanel() {
+  const s1=SIM.scenarios[1], s2=SIM.scenarios[2];
+  setText('cmp-time-conv',    `${s1.journeyTime} min`);
+  setText('cmp-time-smart',   `${s2.journeyTime} min`);
+  setText('cmp-speed-conv',   `${s1.avgSpeed} km/h`);
+  setText('cmp-speed-smart',  `${s2.avgSpeed} km/h`);
+  setText('cmp-stops-conv',   `${s1.stops}`);
+  setText('cmp-stops-smart',  `${s2.stops}`);
+  setText('cmp-fuel-conv',    `+${s1.fuelExtra}%`);
+  setText('cmp-fuel-smart',   `+${s2.fuelExtra}%`);
+  setText('cmp-stress-conv',  `${s1.stressIndex} / 100`);
+  setText('cmp-stress-smart', `${s2.stressIndex} / 100`);
+}
+
+function updateScenarioLabel() {
+  const sc = SIM.scenarios[SIM.currentScenario];
+  setText('scenario-label', sc.label);
+  const el = $('scenario-label');
+  if (el) el.setAttribute('text','color', sc.labelColor);
+}
+
+function applyScenario() {
+  // Sky tint changes between scenarios to reinforce visual difference
+  const sc = SIM.scenarios[SIM.currentScenario];
+  const sky = $('sky');
+  if (sky) sky.setAttribute('color', sc.skyColor);
+  updateHUD();
+}
+
+/* ───────────────────────────────────────────────────────────────
+   ACTION HANDLER
+─────────────────────────────────────────────────────────────── */
+function handleAction(action) {
+  switch(action) {
+    case 'startExperience':  showScene('traffic');      break;
+    case 'goToSceneC':       showScene('consequences'); break;
+    case 'goToSceneB':       showScene('traffic');      break;
+    case 'goToSceneD':       showScene('compare');      break;
+    case 'goToSceneE':       showScene('results');      break;
+    case 'toggleScenario':
+      SIM.currentScenario = SIM.currentScenario === 1 ? 2 : 1;
+      updateScenarioLabel();
+      applyScenario();
+      break;
+    case 'replay':
+      SIM.currentScenario = 1;
+      showScene('traffic');
+      break;
+    case 'compareAgain':
+      SIM.currentScenario = 1;
+      showScene('compare');
+      break;
+    case 'returnToStart':
+      SIM.currentScenario = 1;
+      showScene('intro');
+      break;
+    case 'showGuide':
+      SIM.guideOpen = true;
+      setVisible('guide-modal', true);
+      break;
+    case 'hideGuide':
+      SIM.guideOpen = false;
+      setVisible('guide-modal', false);
+      break;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────
+   SEEDED PRNG  (mulberry32)
+─────────────────────────────────────────────────────────────── */
+function seededRng(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s |= 0; s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function lighten(hex, amt) {
+  let r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  r=Math.min(255,r+Math.round((255-r)*amt));
+  g=Math.min(255,g+Math.round((255-g)*amt));
+  b=Math.min(255,b+Math.round((255-b)*amt));
+  return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PROCEDURAL ENVIRONMENT BUILDER
+═══════════════════════════════════════════════════════════════ */
+
+function buildEnvironment() {
+  buildStarField();
+  buildLaneMarkings();
+  buildCrossings();
+  buildBuildings();
+  buildStreetlights();
+  buildTrafficLights();
+  buildVehicles();
+  buildFarSkyline();
+}
+
+/* ── Star field ─────────────────────────────────────────────── */
+function buildStarField() {
+  const parent = $('star-field');
+  if (!parent) return;
+  const rng = seededRng(13);
+  for (let i = 0; i < 220; i++) {
+    const theta = rng() * Math.PI * 2;
+    const phi   = Math.acos(1 - rng() * 1.4); // upper hemisphere
+    const r     = 140;
+    const x = r * Math.sin(phi) * Math.cos(theta);
+    const y = r * Math.cos(phi) + 10;
+    const z = r * Math.sin(phi) * Math.sin(theta);
+    const star = document.createElement('a-sphere');
+    star.setAttribute('radius', 0.12 + rng() * 0.28);
+    star.setAttribute('position', `${x} ${y} ${z}`);
+    const bright = Math.floor(180 + rng() * 75);
+    star.setAttribute('material', `color: rgb(${bright},${bright},${Math.min(255,bright+20)}); emissive: rgb(${bright},${bright},${bright}); emissiveIntensity: 1; shader: flat`);
+    parent.appendChild(star);
+  }
+}
+
+/* ── Lane markings ─────────────────────────────────────────── */
+function buildLaneMarkings() {
+  const parent = $('lane-markings');
+  if (!parent) return;
+  // Divider lines at x = -8,-4,0,4,8
+  [-8,-4,0,4,8].forEach(x => {
+    const isCenter = x === 0;
+    for (let z=-90; z<90; z+=5) {
+      const d = document.createElement('a-box');
+      d.setAttribute('width',  isCenter ? 0.28 : 0.13);
+      d.setAttribute('height', 0.005);
+      d.setAttribute('depth',  isCenter ? 3.6  : 2.8);
+      d.setAttribute('position',`${x} 0 ${z}`);
+      d.setAttribute('material',`color:${isCenter?'#ffcc00':'#f0f0e0'};shader:flat`);
+      parent.appendChild(d);
+    }
+  });
+}
+
+/* ── Pedestrian crossings ──────────────────────────────────── */
+function buildCrossings() {
+  const parent = $('crossings');
+  if (!parent) return;
+  [-28,2,32].forEach(z => {
+    for(let s=0;s<7;s++){
+      const strip = document.createElement('a-box');
+      strip.setAttribute('width',22); strip.setAttribute('height',0.008); strip.setAttribute('depth',0.65);
+      strip.setAttribute('position',`0 0 ${z+s*0.95}`);
+      strip.setAttribute('material','color:#e8e0c8;shader:flat');
+      parent.appendChild(strip);
+    }
+  });
+}
+
+/* ── Buildings ─────────────────────────────────────────────── */
+function buildBuildings() {
+  const parent = $('buildings');
+  if (!parent) return;
+  const pal  = ['#1e2d50','#162038','#1a2a48','#0f1a30','#243455','#1c3152','#2a3a5c'];
+  const accP = ['#2b6cb0','#553c9a','#276749','#744210','#2c5282'];
+  const rng  = seededRng(42);
+
+  [-1,1].forEach(side => {
+    const baseX = side * 18;
+    let curZ = -90;
+    while (curZ < 90) {
+      const w  = 4 + rng()*6,  h = 4 + rng()*20, d = 4 + rng()*6;
+      const gap= 0.4 + rng()*1.4;
+      const x  = baseX + side*(w/2 + rng()*2);
+      const z  = curZ + d/2;
+
+      // Main building
+      const bld = document.createElement('a-box');
+      bld.setAttribute('width',w); bld.setAttribute('height',h); bld.setAttribute('depth',d);
+      bld.setAttribute('position',`${x} ${h/2} ${z}`);
+      bld.setAttribute('material',`color:${pal[Math.floor(rng()*pal.length)]};roughness:0.9;metalness:0.04`);
+      parent.appendChild(bld);
+
+      // Windows
+      const rows=Math.floor(h/2.5), cols=Math.floor(w/1.8);
+      for(let r=0;r<rows;r++){
+        for(let c=0;c<cols;c++){
+          if(rng()>0.5) continue;
+          const win=document.createElement('a-plane');
+          win.setAttribute('width',0.5); win.setAttribute('height',0.65);
+          const wx=x-w/2+0.9+c*(w/cols), wy=1.5+r*2.5;
+          const wz=side===-1 ? z+d/2+0.04 : z-d/2-0.04;
+          win.setAttribute('position',`${wx} ${wy} ${wz}`);
+          win.setAttribute('rotation',`0 ${side===-1?0:180} 0`);
+          win.setAttribute('material',`color:${rng()>0.28?'#ffeebb':'#1a2540'};shader:flat;opacity:0.9`);
+          parent.appendChild(win);
+        }
+      }
+
+      // Accent cornice
+      const stripe=document.createElement('a-box');
+      stripe.setAttribute('width',w+0.14); stripe.setAttribute('height',0.28); stripe.setAttribute('depth',d+0.14);
+      stripe.setAttribute('position',`${x} ${h+0.14} ${z}`);
+      stripe.setAttribute('material',`color:${accP[Math.floor(rng()*accP.length)]};shader:flat`);
+      parent.appendChild(stripe);
+
+      curZ += d + gap;
+    }
+  });
+}
+
+/* ── Streetlights ──────────────────────────────────────────── */
+function buildStreetlights() {
+  const parent = $('streetlights');
+  if (!parent) return;
+  [-13.2,13.2].forEach(sx => {
+    for(let z=-80;z<80;z+=16){
+      // Pole
+      const pole=document.createElement('a-cylinder');
+      pole.setAttribute('radius',0.08); pole.setAttribute('height',5.5);
+      pole.setAttribute('position',`${sx} 2.75 ${z}`);
+      pole.setAttribute('material','color:#4a5568;roughness:0.8');
+      parent.appendChild(pole);
+      // Arm
+      const arm=document.createElement('a-box');
+      arm.setAttribute('width',1.3); arm.setAttribute('height',0.08); arm.setAttribute('depth',0.08);
+      arm.setAttribute('position',`${sx+(sx<0?0.65:-0.65)} 5.5 ${z}`);
+      arm.setAttribute('material','color:#4a5568');
+      parent.appendChild(arm);
+      // Lamp
+      const lamp=document.createElement('a-sphere');
+      lamp.setAttribute('radius',0.2);
+      lamp.setAttribute('position',`${sx+(sx<0?1.3:-1.3)} 5.4 ${z}`);
+      lamp.setAttribute('material','color:#fffde0;emissive:#ffd780;emissiveIntensity:0.9;shader:flat');
+      parent.appendChild(lamp);
+    }
+  });
+}
+
+/* ── Traffic lights ────────────────────────────────────────── */
+function buildTrafficLights() {
+  const parent = $('traffic-lights');
+  if (!parent) return;
+  [-28,2,32].forEach((z,idx) => {
+    [-1,1].forEach(side => {
+      const tl = document.createElement('a-entity');
+      tl.setAttribute('position',`${side*12.2} 0 ${z}`);
+      tl.setAttribute('traffic-light-cycle',`offset:${idx*4.1}`);
+
+      const pole=document.createElement('a-cylinder');
+      pole.setAttribute('radius',0.09); pole.setAttribute('height',4.5);
+      pole.setAttribute('position','0 2.25 0');
+      pole.setAttribute('material','color:#4a5568');
+      tl.appendChild(pole);
+
+      const housing=document.createElement('a-box');
+      housing.setAttribute('width',0.36); housing.setAttribute('height',1.05); housing.setAttribute('depth',0.36);
+      housing.setAttribute('position','0 4.5 0');
+      housing.setAttribute('material','color:#2d3748');
+      tl.appendChild(housing);
+
+      [{cls:'tl-red',dy:0.32},{cls:'tl-amber',dy:0},{cls:'tl-green',dy:-0.32}].forEach(l=>{
+        const sp=document.createElement('a-sphere');
+        sp.classList.add(l.cls);
+        sp.setAttribute('radius',0.1);
+        sp.setAttribute('position',`0 ${4.5+l.dy} 0.19`);
+        sp.setAttribute('material','color:#111;shader:flat');
+        tl.appendChild(sp);
+      });
+
+      parent.appendChild(tl);
+    });
+  });
+}
+
+/* ── Vehicles ──────────────────────────────────────────────── */
+function buildVehicles() {
+  const parent = $('vehicles');
+  if (!parent) return;
+  const rng = seededRng(7);
+
+  // 6 lanes: 3 toward viewer (dir=1), 3 away (dir=-1)
+  const lanes = [[-10,1],[-6.5,1],[-3,1],[3,-1],[6.5,-1],[10,-1]];
+
+  const defs = [
+    { type:'car',   w:1.6, h:0.65, d:3.0, spd:5.2, cnt:6,
+      colors:['#c0392b','#2980b9','#27ae60','#f39c12','#8e44ad','#1abc9c','#e74c3c','#3498db','#95a5a6'] },
+    { type:'bus',   w:2.2, h:1.6,  d:6.5, spd:3.5, cnt:2,
+      colors:['#e67e22','#2ecc71','#c0392b'] },
+    { type:'truck', w:2.0, h:1.8,  d:7.0, spd:3.0, cnt:2,
+      colors:['#7f8c8d','#95a5a6','#bdc3c7'] },
+  ];
+
+  lanes.forEach(([lx,dir]) => {
+    let zo = -75;
+    defs.forEach(def => {
+      for(let i=0;i<def.cnt;i++){
+        const z = zo + i*(def.d + 4 + rng()*9);
+        spawnVehicle(parent, def, lx, dir, z, rng);
+      }
+      zo += def.cnt*(def.d+14);
+    });
+  });
+}
+
+function spawnVehicle(parent, def, lx, dir, z0, rng) {
+  const wrap = document.createElement('a-entity');
+  wrap.setAttribute('position',`${lx} 0 ${z0}`);
+  wrap.setAttribute('rotation',`0 ${dir===1?0:180} 0`);
+  wrap.setAttribute('vehicle-move',`speed:${def.spd*(0.8+rng()*0.4)};direction:${dir};length:${def.d}`);
+
+  const bodyColor = def.colors[Math.floor(rng()*def.colors.length)];
+
+  // Chassis
+  const chassis = document.createElement('a-box');
+  chassis.setAttribute('width',def.w); chassis.setAttribute('height',def.h*0.55); chassis.setAttribute('depth',def.d);
+  chassis.setAttribute('position',`0 ${def.h*0.275} 0`);
+  chassis.setAttribute('material',`color:${bodyColor};roughness:0.6;metalness:0.25`);
+  wrap.appendChild(chassis);
+
+  // Upper body
+  if(def.type==='car'){
+    const roof=document.createElement('a-box');
+    roof.setAttribute('width',def.w*0.82); roof.setAttribute('height',def.h*0.45); roof.setAttribute('depth',def.d*0.58);
+    roof.setAttribute('position',`0 ${def.h*0.275+def.h*0.225} 0`);
+    roof.setAttribute('material',`color:${lighten(bodyColor,0.12)};roughness:0.6;metalness:0.25`);
+    wrap.appendChild(roof);
+  } else if(def.type==='bus'){
+    const roof=document.createElement('a-box');
+    roof.setAttribute('width',def.w); roof.setAttribute('height',def.h*0.48); roof.setAttribute('depth',def.d*0.96);
+    roof.setAttribute('position',`0 ${def.h*0.275+def.h*0.24} 0`);
+    roof.setAttribute('material',`color:${bodyColor};roughness:0.6`);
+    wrap.appendChild(roof);
+  } else {
+    // Truck cab
+    const cab=document.createElement('a-box');
+    cab.setAttribute('width',def.w); cab.setAttribute('height',def.h*0.82); cab.setAttribute('depth',2.2);
+    cab.setAttribute('position',`0 ${def.h*0.41} ${def.d/2-1.1}`);
+    cab.setAttribute('material',`color:${bodyColor};roughness:0.6;metalness:0.3`);
+    wrap.appendChild(cab);
+  }
+
+  // Wheels
+  [[-1,1],[1,1],[-1,-1],[1,-1]].forEach(([wx,wz])=>{
+    const wh=document.createElement('a-cylinder');
+    wh.setAttribute('radius',0.3); wh.setAttribute('height',0.22); wh.setAttribute('rotation','0 0 90');
+    wh.setAttribute('position',`${wx*(def.w/2+0.08)} 0.3 ${wz*(def.d/2-0.55)}`);
+    wh.setAttribute('material','color:#1a1a1a;roughness:1');
+    wrap.appendChild(wh);
+    const hub=document.createElement('a-cylinder');
+    hub.setAttribute('radius',0.14); hub.setAttribute('height',0.24); hub.setAttribute('rotation','0 0 90');
+    hub.setAttribute('position',`${wx*(def.w/2+0.08)} 0.3 ${wz*(def.d/2-0.55)}`);
+    hub.setAttribute('material','color:#aaaaaa;roughness:0.3;metalness:0.8');
+    wrap.appendChild(hub);
+  });
+
+  // Headlights (front)
+  [-0.42,0.42].forEach(ox=>{
+    const hl=document.createElement('a-sphere');
+    hl.setAttribute('radius',0.12);
+    hl.setAttribute('position',`${ox} ${def.h*0.34} ${def.d/2+0.06}`);
+    hl.setAttribute('material','color:#ffffff;emissive:#ffffcc;emissiveIntensity:0.9;shader:flat');
+    wrap.appendChild(hl);
+  });
+
+  // Taillights (rear)
+  [-0.38,0.38].forEach(ox=>{
+    const tl=document.createElement('a-sphere');
+    tl.setAttribute('radius',0.1);
+    tl.setAttribute('position',`${ox} ${def.h*0.34} ${-(def.d/2+0.06)}`);
+    tl.setAttribute('material','color:#cc0000;emissive:#ff0000;emissiveIntensity:0.8;shader:flat');
+    wrap.appendChild(tl);
+  });
+
+  parent.appendChild(wrap);
+}
+
+/* ── Far skyline silhouette ────────────────────────────────── */
+function buildFarSkyline() {
+  const parent = $('far-skyline');
+  if (!parent) return;
+  const rng = seededRng(99);
+  const pal = ['#0d1a3a','#0f2040','#112244','#0e1c38','#101e3e'];
+  for(let i=-16;i<=16;i++){
+    const w=5+rng()*8, h=12+rng()*44, d=4+rng()*4;
+    const x=i*9+(rng()-0.5)*3.5;
+    const bld=document.createElement('a-box');
+    bld.setAttribute('width',w); bld.setAttribute('height',h); bld.setAttribute('depth',d);
+    bld.setAttribute('position',`${x} ${h/2} 0`);
+    bld.setAttribute('material',`color:${pal[Math.floor(rng()*pal.length)]};shader:flat`);
+    parent.appendChild(bld);
+    // Some lit windows on skyline
+    if(rng()>0.4){
+      const win=document.createElement('a-box');
+      win.setAttribute('width',0.6); win.setAttribute('height',0.6); win.setAttribute('depth',0.1);
+      win.setAttribute('position',`${x} ${h*0.6} ${d/2+0.1}`);
+      win.setAttribute('material','color:#ffeebb;emissive:#ffe080;emissiveIntensity:0.5;shader:flat');
+      parent.appendChild(win);
+    }
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   SCENE TRANSITION FLASH
+───────────────────────────────────────────────────────────── */
+function flashTransition() {
+  const el = $('scene-flash');
+  if (!el) return;
+  el.classList.add('active');
+  setTimeout(() => el.classList.remove('active'), 160);
+}
+
+// Wrap showScene with flash
+const _showSceneOrig = showScene;
+window.showScene = function(name) {
+  if (SIM.currentScene !== name) flashTransition();
+  _showSceneOrig(name);
+};
+
+/* ─────────────────────────────────────────────────────────────
+   WEB AUDIO — AMBIENT ENGINE / CITY HUM
+   Procedurally synthesised; no external audio files needed.
+───────────────────────────────────────────────────────────── */
+let audioCtx = null;
+let ambientRunning = false;
+
+function startAmbientSound() {
+  if (ambientRunning) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioCtx) return;
+    ambientRunning = true;
+
+    const masterGain = audioCtx.createGain();
+    masterGain.gain.setValueAtTime(0.06, audioCtx.currentTime);
+    masterGain.connect(audioCtx.destination);
+
+    // Low city rumble (two slightly detuned oscillators)
+    [44, 46].forEach(freq => {
+      const osc = audioCtx.createOscillator();
+      const g   = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+      g.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      const filt = audioCtx.createBiquadFilter();
+      filt.type = 'lowpass'; filt.frequency.setValueAtTime(180, audioCtx.currentTime);
+      osc.connect(filt); filt.connect(g); g.connect(masterGain);
+      osc.start();
+    });
+
+    // Subtle mid-range hiss (traffic white noise layer)
+    const bufLen = audioCtx.sampleRate * 2;
+    const buf = audioCtx.createBuffer(1, bufLen, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buf; noise.loop = true;
+    const noiseFilt = audioCtx.createBiquadFilter();
+    noiseFilt.type = 'bandpass'; noiseFilt.frequency.setValueAtTime(800, audioCtx.currentTime); noiseFilt.Q.value = 0.5;
+    const noiseGain = audioCtx.createGain(); noiseGain.gain.setValueAtTime(0.04, audioCtx.currentTime);
+    noise.connect(noiseFilt); noiseFilt.connect(noiseGain); noiseGain.connect(masterGain);
+    noise.start();
+  } catch(e) {
+    // Audio not supported or blocked — silently continue
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   DESKTOP INTERACTION
+───────────────────────────────────────────────────────────── */
+function setupDesktopCursor() {
+  const cam = $('camera-head');
+  if (!cam) return;
+  const cur = document.createElement('a-entity');
+  cur.setAttribute('cursor','rayOrigin:mouse;fuse:false');
+  cur.setAttribute('raycaster','objects:.interactive;far:30');
+  cam.appendChild(cur);
+}
+
+function setupKeyboard() {
+  document.addEventListener('keydown', e => {
+    if (e.key==='f'||e.key==='F') {
+      if(document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen();
+    }
+    if (e.key==='g'||e.key==='G') handleAction(SIM.guideOpen?'hideGuide':'showGuide');
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   CUSTOM ENTER VR BUTTON
+───────────────────────────────────────────────────────────── */
+function setupEnterVRButton() {
+  const btn = $('enter-vr-btn');
+  const scene = document.querySelector('a-scene');
+  if (!btn || !scene) return;
+
+  // Only show if WebXR is available
+  if (navigator.xr) {
+    navigator.xr.isSessionSupported('immersive-vr').then(supported => {
+      if (supported) btn.classList.add('visible');
+    }).catch(() => {});
+  }
+
+  btn.addEventListener('click', () => {
+    startAmbientSound();
+    if (scene.is('vr-mode')) {
+      scene.exitVR();
+    } else {
+      scene.enterVR();
+    }
+  });
+
+  scene.addEventListener('enter-vr', () => {
+    btn.textContent = '⏹ Exit VR';
+    startAmbientSound();
+  });
+  scene.addEventListener('exit-vr', () => {
+    btn.textContent = '🥽 Enter VR';
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   CONTROLLER FACE BUTTONS  (A/X toggle guide)
+───────────────────────────────────────────────────────────── */
+function setupControllerButtons() {
+  ['left-controller','right-controller'].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    ['abuttondown','xbuttondown'].forEach(evt =>
+      el.addEventListener(evt, () => handleAction(SIM.guideOpen?'hideGuide':'showGuide'))
+    );
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   BOOT
+───────────────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  setupKeyboard();
+  setupEnterVRButton();
+
+  // Start ambient sound on first user interaction (browser autoplay policy)
+  document.addEventListener('pointerdown', startAmbientSound, { once: true });
+
+  const scene = document.querySelector('a-scene');
+  if (!scene) return;
+
+  scene.addEventListener('loaded', () => {
+    buildEnvironment();
+    setupDesktopCursor();
+    setupControllerButtons();
+    showScene('intro');
+
+    // Fade out loading screen
+    setTimeout(() => {
+      const ls = $('loading-screen');
+      if (ls) {
+        ls.classList.add('fade-out');
+        setTimeout(() => { if(ls.parentNode) ls.parentNode.removeChild(ls); }, 900);
+      }
+    }, 2500);
+  });
+});
+</script>
+</body>
+</html>
